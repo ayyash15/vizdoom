@@ -1,0 +1,9 @@
+# Already installed in doom_snn_env (versions from your log)
+torch==2.6.0+cu124
+snntorch>=0.9
+vizdoom>=1.2
+gymnasium
+opencv-python-headless
+matplotlib
+tqdm
+numpy
