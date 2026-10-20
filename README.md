@@ -1,3 +1,5 @@
+cd C:\Users\ayyas\doom_snn\doom_snn
+@'
 # Spiking Neural Network DOOM Agent (PeraMorphIQ)
 
 A Python spiking neural network (SNN) pipeline that learns to play DOOM autonomously
@@ -6,108 +8,64 @@ deployment on an FPGA neuromorphic accelerator, so the network uses only hardwar
 building blocks: convolution / linear layers and leaky integrate-and-fire (LIF) neurons
 (no batch norm, no max-pooling).
 
-**Status (20 Oct 2026):** baseline agent trained on the `basic` scenario; v2 training
-pipeline committed and validation run in progress. Hardware export is not started yet.
+**Status (20 Oct 2026):** the pipeline runs end to end on the `basic` scenario. The trained
+agent has not yet learned to aim (see Key finding). Diagnosis is done; the fix is the next step.
+Hardware export has not started.
 
 ## Method
 
 - **Environment:** ViZDoom (`basic` scenario first), 160x120 grayscale frames resized to
-  64x64, 4 stacked frames, frame-skip 4.
+  64x64, 4 stacked frames, frame-skip 4, three actions (move left, move right, attack).
 - **Network (`model.py`, `SpikingDQN`):** Conv-LIF x3 -> FC-LIF -> non-spiking LIF readout.
-  The readout's membrane potential after T timesteps is used as the Q-values.
-  Input uses direct (constant-current) encoding; surrogate gradients from snnTorch.
-- **Learning (`train.py`):** DQN with experience replay, epsilon-greedy exploration and a
-  target network, trained with Huber loss, gradient clipping and reward scaling.
-- **Evaluation (`evaluate.py`):** runs the trained policy with no human input and reports
-  mean reward, success rate and the per-layer spike rate (activity is the energy proxy
+  The readout membrane potential after T timesteps is used as the Q-values.
+  Direct (constant-current) input encoding; surrogate gradients from snnTorch; fixed beta.
+- **Learning (`train.py`):** DQN with experience replay, epsilon-greedy exploration,
+  target network, Double DQN, Huber loss, gradient clipping and reward scaling (x0.01).
+- **Evaluation (`evaluate.py`):** runs a trained policy with no human input and reports mean
+  reward, success rate (reward > 0) and per-layer spike rates (activity is the energy proxy
   for neuromorphic hardware).
+- **Diagnosis (`diagnose.py`):** action usage and Q-value spread for successful vs failed episodes.
 
-## Results so far
+## Results
 
-| Run | Scenario | Steps | Result |
-|-----|----------|-------|--------|
-| Baseline (v1) | basic | 50k (resumed) | Unstable. Eval over 20 episodes: mean reward -76.5 (best checkpoint) and -67.9 (last); episodes are bimodal (+95 success vs -410 timeout), roughly 55-60% success. Training curve oscillates between -200 and +80 with no stable upward trend. |
-| v2 | basic | 50k | In progress |
+v2 run: 50,000 steps on `basic`. Each checkpoint evaluated over 100 episodes (eps = 0.02).
 
-Baseline spike rates (spikes/neuron/timestep): L1 0.25, L2 0.40, L3 0.58, L4 0.61, which is
-denser than ideal for neuromorphic hardware.
+| Checkpoint | Success rate | Mean reward |
+|------------|--------------|-------------|
+| v2_best (step 15k, picked by 30-episode eval) | 62% | -75.1 |
+| v2_step30000 | 54% | -131.1 |
+| v2_last (step 50k) | 70% | -55.9 |
 
-### Diagnosis of the baseline
+Spike rates for v2_last (spikes/neuron/timestep): L1 0.21, L2 0.43, L3 0.51, L4 0.65.
+This is dense activity; reducing it is a goal before hardware deployment.
 
-- Learnable LIF decay (`beta`) could drift during training.
-- Evaluation used 10 episodes, too noisy to pick a "best" checkpoint when episode rewards
-  swing between +95 and -410.
-- Greedy evaluation with no randomness probably lets the agent get stuck repeating one
-  action until the episode times out (hypothesis, being checked with v2).
+Training history:
 
-### v2 changes
+- Baseline (v1): learnable beta, 10-episode evals. Training curve oscillated between about
+  -200 and +80 with no upward trend; 20-episode eval success was roughly 55-60%.
+- v2: success 60% at 5k steps (while still mostly exploring), peak 77% at 15k (30-episode eval,
+  an optimistic pick), then 47% at 50k on the same 30-episode eval. 100-episode numbers above
+  are the reliable ones. A short 6-episode clip of v2_last scored 6/6 successes (used for the demo video).
 
-- Fixed (non-learned) `beta`, which is also what the FPGA will implement.
-- Double DQN and a lower learning rate (5e-5).
-- Evaluation every 5k steps over 30 episodes, with a tiny eval epsilon (0.02).
-- Best checkpoint chosen by success rate (reward > 0), and a checkpoint saved at every eval.
-- `--run_name` tag so runs do not overwrite each other's logs and checkpoints.
+### Key finding
 
-## Setup (Windows, Python 3.11 or 3.12)
+`diagnose.py` on v2_last (30 episodes):
 
-```
-python -m venv doom_snn_env
-doom_snn_env\Scripts\Activate.ps1
-pip install -r requirements-gpu.txt   # NVIDIA GPU (CUDA 12.4)
-# pip install -r requirements-cpu.txt # no GPU (slow)
-python check_setup.py
-```
+- The agent presses ATTACK about 99-100% of the time, in successful and failed episodes alike.
+- Successful episodes last about 3 steps (the monster happened to spawn in the line of fire).
+  Failed episodes last about 70 steps (shooting until the episode times out, reward about -410).
+- So the 55-70% success rate is roughly the chance that the monster spawns in front of the
+  agent, not learned aiming. Reward is bimodal: +95 or about -410.
+- The Q-value spread is about 290 and identical at every step. With the reward scaling,
+  Q-values should be within about +-4. The Q-values have exploded and the output no longer
+  depends on the observation, which is why the greedy policy always picks the same action.
 
-Tested with torch 2.6.0 (CUDA 12.4 build), snntorch 1.0.0, vizdoom 1.3.2, gymnasium 1.4.0 on an
-RTX 3050 Laptop GPU (4 GB). Use the High performance power plan on laptops: the GPU crashed
-once under the Balanced plan during sustained training.
+### Likely causes and next experiments
 
-## Usage
+- Q-value divergence combined with exploration that decays to 5% by step 20k, so once the
+  policy locks onto shooting it almost never tries moving.
+- Next: (1) a plain ReLU CNN baseline with the same layer sizes to tell whether the problem is
+  the spiking network or the DQN setup; (2) longer exploration, e.g.
+  `--eps_end 0.2 --eps_decay_frac 0.8 --lr 2e-5`; (3) check Q-values stay bounded during training.
 
-Train:
-
-```
-python train.py --scenario basic --total_steps 50000 --run_name v2
-```
-
-Evaluate a checkpoint (success rate and spike rates are printed):
-
-```
-python evaluate.py --ckpt checkpoints\v2_best.pt --episodes 30
-python evaluate.py --ckpt checkpoints\v2_best.pt --episodes 3 --render --video
-```
-
-Outputs: `logs/<run>_episodes.csv`, `logs/<run>_evals.csv`, `logs/<run>_curve.png`,
-`checkpoints/<run>_best.pt` (not tracked in git), `videos/` (not tracked in git).
-
-## Files
-
-| File | Purpose |
-|------|---------|
-| `config.py` | Hyperparameters (all overridable from the command line) |
-| `env.py` | ViZDoom wrapper: grayscale, resize, frame-skip, frame-stack |
-| `model.py` | Spiking Q-network |
-| `replay.py` | Memory-light replay buffer |
-| `train.py` | DQN training loop, evaluation, checkpointing |
-| `evaluate.py` | Run a trained policy, report reward, success rate, spike rates |
-| `check_setup.py` | Verify GPU, ViZDoom and speed before a run |
-
-## New options (v3 tooling)
-
-- `--model cnn`: non-spiking CNN-DQN baseline with the same layer sizes (compare against the SNN).
-- `--rate_reg 0.05`: firing-rate penalty added to the loss (SNN only), to reduce spike activity.
-- `evaluate.py` now prints action counts, to check whether the agent gets stuck on one action.
-
-```
-python train.py --model cnn --run_name cnn_base
-python train.py --rate_reg 0.05 --run_name snn_reg05
-python train.py --T 4 --run_name v2_T4
-```
-
-## Next steps
-
-1. Validate v2 on `basic` (target: stable success rate above 80%).
-2. Ablate the number of timesteps T (4 / 8 / 16) and report reward versus latency.
-3. Report and reduce spike activity (firing-rate regularisation).
-4. Train on a harder scenario (`defend_the_center`).
-5. Later: int8 weight quantisation and export for the FPGA accelerator.
+## Setup (Windows, Python 3.11)
