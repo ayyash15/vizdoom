@@ -13,24 +13,27 @@ class Config:
 
     # --- SNN ---
     T: int = 8                     # simulation timesteps per decision
-    beta: float = 0.9              # LIF membrane decay
+    beta: float = 0.9              # LIF membrane decay (now FIXED, not learned -> stable + FPGA friendly)
     hidden: int = 256
 
     # --- DQN ---
     total_steps: int = 150_000     # agent decisions (each = frame_skip game tics)
     batch_size: int = 32
-    lr: float = 1e-4
+    lr: float = 5e-5               # was 1e-4
     gamma: float = 0.99
     buffer_size: int = 30_000      # ~20 KB/transition -> ~600 MB RAM
     warmup: int = 1_000
     train_every: int = 2
     target_update: int = 1_000
+    double_dqn: int = 1            # 1 = Double DQN (less Q overestimation), 0 = vanilla
     eps_start: float = 1.0
     eps_end: float = 0.05
     eps_decay_frac: float = 0.4    # fraction of total_steps for linear decay
     grad_clip: float = 10.0
 
-    # --- misc ---
-    eval_every: int = 10_000
-    eval_episodes: int = 10
+    # --- evaluation / bookkeeping ---
+    eval_every: int = 5_000
+    eval_episodes: int = 30        # was 10 (too noisy to pick a "best" checkpoint)
+    eval_eps: float = 0.02         # tiny exploration at eval so the agent can't get stuck in a fixed loop
+    run_name: str = ""             # tag for logs/checkpoints; empty = scenario name
     seed: int = 42

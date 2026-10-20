@@ -3,6 +3,9 @@
 Direct (constant-current) input encoding: the first conv is computed once and injected
 as current at every timestep. Only LIF neurons + conv/linear layers are used (no batch norm,
 no max-pool), which keeps the model easy to map onto an FPGA neuromorphic accelerator.
+
+v2: beta is fixed (learn_beta=False). A learnable beta can drift past 1.0 and destabilise
+training, and a fixed beta is what the FPGA will implement anyway.
 """
 import torch
 import torch.nn as nn
@@ -24,11 +27,11 @@ class SpikingDQN(nn.Module):
         self.fc1 = nn.Linear(flat, hidden)
         self.fc2 = nn.Linear(hidden, n_actions)
 
-        kw = dict(beta=beta, spike_grad=sg, init_hidden=True, learn_beta=True)
+        kw = dict(beta=beta, spike_grad=sg, init_hidden=True, learn_beta=False)
         self.lif1, self.lif2 = snn.Leaky(**kw), snn.Leaky(**kw)
         self.lif3, self.lif4 = snn.Leaky(**kw), snn.Leaky(**kw)
         self.lif_out = snn.Leaky(beta=beta, spike_grad=sg, init_hidden=True,
-                                 output=True, reset_mechanism="none", learn_beta=True)
+                                 output=True, reset_mechanism="none", learn_beta=False)
         self._lifs = [self.lif1, self.lif2, self.lif3, self.lif4, self.lif_out]
 
     def forward(self, x, return_rates=False):
