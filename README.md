@@ -48,12 +48,13 @@ denser than ideal for neuromorphic hardware.
 - Best checkpoint chosen by success rate (reward > 0), and a checkpoint saved at every eval.
 - `--run_name` tag so runs do not overwrite each other's logs and checkpoints.
 
-## Setup (Windows, Python 3.11)
+## Setup (Windows, Python 3.11 or 3.12)
 
 ```
 python -m venv doom_snn_env
 doom_snn_env\Scripts\Activate.ps1
-pip install -r requirements.txt
+pip install -r requirements-gpu.txt   # NVIDIA GPU (CUDA 12.4)
+# pip install -r requirements-cpu.txt # no GPU (slow)
 python check_setup.py
 ```
 
@@ -90,6 +91,18 @@ Outputs: `logs/<run>_episodes.csv`, `logs/<run>_evals.csv`, `logs/<run>_curve.pn
 | `train.py` | DQN training loop, evaluation, checkpointing |
 | `evaluate.py` | Run a trained policy, report reward, success rate, spike rates |
 | `check_setup.py` | Verify GPU, ViZDoom and speed before a run |
+
+## New options (v3 tooling)
+
+- `--model cnn`: non-spiking CNN-DQN baseline with the same layer sizes (compare against the SNN).
+- `--rate_reg 0.05`: firing-rate penalty added to the loss (SNN only), to reduce spike activity.
+- `evaluate.py` now prints action counts, to check whether the agent gets stuck on one action.
+
+```
+python train.py --model cnn --run_name cnn_base
+python train.py --rate_reg 0.05 --run_name snn_reg05
+python train.py --T 4 --run_name v2_T4
+```
 
 ## Next steps
 

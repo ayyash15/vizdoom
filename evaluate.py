@@ -7,7 +7,7 @@ import numpy as np
 import torch
 
 from env import DoomEnv
-from model import SpikingDQN
+from model import build_model
 
 
 def main():
@@ -23,7 +23,7 @@ def main():
     ck = torch.load(args.ckpt, map_location=device)
     c = ck["cfg"]
     env = DoomEnv(c["scenario"], c["frame_skip"], c["img_size"], c["stack"], render=args.render)
-    net = SpikingDQN(ck["n_actions"], c["stack"], c["img_size"], c["T"], c["beta"], c["hidden"]).to(device)
+    net = build_model(c, ck["n_actions"]).to(device)
     net.load_state_dict(ck["model"], strict=False); net.eval()
 
     writer = None
@@ -33,6 +33,7 @@ def main():
         writer = cv2.VideoWriter(f"videos/{name}.mp4", cv2.VideoWriter_fourcc(*"mp4v"), 15, (480, 360))
 
     all_rates, scores = [], []
+    action_counts = {}      # how often each action is chosen (detects an agent stuck on one action)
     for ep in range(args.episodes):
         s, done, total = env.reset(), False, 0.0
         while not done:
@@ -41,6 +42,7 @@ def main():
                 q, rates = net(x, return_rates=True)
             all_rates.append(rates)
             a = random.randrange(ck["n_actions"]) if random.random() < args.eps else q.argmax(1).item()
+            action_counts[a] = action_counts.get(a, 0) + 1
             s, r, done = env.step(a)
             total += r
             if writer:
@@ -50,6 +52,7 @@ def main():
     if writer: writer.release()
     sc = np.array(scores)
     print(f"mean reward: {sc.mean():.1f}   success rate (reward>0): {(sc > 0).mean()*100:.0f}%")
+    print("action counts:", dict(sorted(action_counts.items())))
     r = np.mean(all_rates, axis=0)
     print("avg spike rate per layer (spikes/neuron/timestep): " + ", ".join(f"L{i+1}={v:.3f}" for i, v in enumerate(r)))
 

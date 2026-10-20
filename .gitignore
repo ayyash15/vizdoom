@@ -3,3 +3,6 @@ __pycache__/
 checkpoints/
 videos/
 _vizdoom.ini
+doom_snn_env/
+logs/*_test*
+logs/timing*

@@ -1,0 +1,6 @@
+-r requirements.txt
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.6.0
+snntorch==1.0.0
+gymnasium==1.4.0
+opencv-python-headless==5.0.0.93

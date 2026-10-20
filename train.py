@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 from config import Config
 from env import DoomEnv
-from model import SpikingDQN
+from model import build_model
 from replay import Replay
 
 
@@ -53,7 +53,7 @@ def main():
     eval_env = DoomEnv(cfg.scenario, cfg.frame_skip, cfg.img_size, cfg.stack, seed=cfg.seed + 1)
     n = env.n_actions
 
-    policy = SpikingDQN(n, cfg.stack, cfg.img_size, cfg.T, cfg.beta, cfg.hidden).to(device)
+    policy = build_model(cfg, n).to(device)
     if args.resume:
         policy.load_state_dict(torch.load(args.resume, map_location=device)["model"], strict=False)
     target = copy.deepcopy(policy).eval()
@@ -94,7 +94,11 @@ def main():
 
         if buf.n >= cfg.warmup and step % cfg.train_every == 0:
             bs, ba, br, bns, bd = buf.sample(cfg.batch_size, device)
-            q = policy(bs).gather(1, ba.unsqueeze(1)).squeeze(1)
+            if cfg.rate_reg > 0 and cfg.model == "snn":
+                q_all, rate = policy(bs, return_reg=True)      # rate = mean spike rate (differentiable)
+            else:
+                q_all, rate = policy(bs), 0.0
+            q = q_all.gather(1, ba.unsqueeze(1)).squeeze(1)
             with torch.no_grad():
                 if cfg.double_dqn:
                     na = policy(bns).argmax(1, keepdim=True)        # policy picks action
@@ -102,7 +106,7 @@ def main():
                 else:
                     nq = target(bns).max(1)[0]
                 y = br + cfg.gamma * nq * (1 - bd)
-            loss = F.smooth_l1_loss(q, y)
+            loss = F.smooth_l1_loss(q, y) + cfg.rate_reg * rate
             opt.zero_grad(); loss.backward()
             torch.nn.utils.clip_grad_norm_(policy.parameters(), cfg.grad_clip)
             opt.step(); loss_v = loss.item()

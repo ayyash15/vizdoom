@@ -11,6 +11,10 @@ class Config:
     stack: int = 4                 # frames stacked as input channels
     reward_scale: float = 0.01     # raw ViZDoom rewards are large (e.g. +101), scale for stable learning
 
+    # --- model ---
+    model: str = "snn"             # snn | cnn  (cnn = non-spiking baseline with the same layer sizes)
+    rate_reg: float = 0.0          # firing-rate penalty weight (SNN only). 0 = off. Try 0.01 - 0.1
+
     # --- SNN ---
     T: int = 8                     # simulation timesteps per decision
     beta: float = 0.9              # LIF membrane decay (now FIXED, not learned -> stable + FPGA friendly)
