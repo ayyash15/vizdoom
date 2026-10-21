@@ -1,8 +1,13 @@
 __pycache__/
 *.pyc
-checkpoints/
+.venv/
+venv/
+doom_snn_env/
+checkpoints/*
+!checkpoints/.gitkeep
 videos/
 _vizdoom.ini
-doom_snn_env/
-logs/*_test*
-logs/timing*
+logs/*
+!logs/.gitkeep
+nohup.out
+*.log

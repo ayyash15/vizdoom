@@ -1,4 +1,4 @@
-"""Central configuration. Defaults are tuned for an RTX 3050 Laptop GPU (4 GB VRAM)."""
+"""Central configuration. Phase 1 = CNN-DQN baseline (target >90% success on basic). Phase 2 = SNN."""
 from dataclasses import dataclass
 
 
@@ -12,7 +12,7 @@ class Config:
     reward_scale: float = 0.01     # raw ViZDoom rewards are large (e.g. +101), scale for stable learning
 
     # --- model ---
-    model: str = "snn"             # snn | cnn  (cnn = non-spiking baseline with the same layer sizes)
+    model: str = "cnn"             # cnn | snn  (PHASE 1: cnn. Switch to snn only after cnn passes 90%)
     rate_reg: float = 0.0          # firing-rate penalty weight (SNN only). 0 = off. Try 0.01 - 0.1
 
     # --- SNN ---
