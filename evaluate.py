@@ -53,8 +53,9 @@ def main():
     sc = np.array(scores)
     print(f"mean reward: {sc.mean():.1f}   success rate (reward>0): {(sc > 0).mean()*100:.0f}%")
     print("action counts:", dict(sorted(action_counts.items())))
-    r = np.mean(all_rates, axis=0)
-    print("avg spike rate per layer (spikes/neuron/timestep): " + ", ".join(f"L{i+1}={v:.3f}" for i, v in enumerate(r)))
+    if c.get("model", "snn") == "snn":
+        r = np.mean(all_rates, axis=0)
+        print("avg spike rate per layer (spikes/neuron/timestep): " + ", ".join(f"L{i+1}={v:.3f}" for i, v in enumerate(r)))
 
 
 if __name__ == "__main__":

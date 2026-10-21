@@ -1,4 +1,4 @@
-"""Train the spiking DQN agent on ViZDoom.   python train.py --scenario basic --run_name v2"""
+"""Train a DQN agent on ViZDoom (cnn or snn).   python train.py --model cnn --run_name cnn_base"""
 import argparse, copy, csv, os, random, time
 from dataclasses import asdict
 
@@ -130,7 +130,7 @@ def main():
     if ep_hist:
         k = min(20, len(ep_hist))
         plt.plot(np.convolve(ep_hist, np.ones(k) / k, mode="valid"), label=f"train (avg{k})")
-    plt.xlabel("episode"); plt.ylabel("reward"); plt.title(f"SNN-DQN on {cfg.scenario} [{tag}]")
+    plt.xlabel("episode"); plt.ylabel("reward"); plt.title(f"{cfg.model.upper()}-DQN on {cfg.scenario} [{tag}]")
     plt.legend(); plt.tight_layout(); plt.savefig(f"logs/{tag}_curve.png", dpi=120)
     print(f"Done. Best eval: success {best_key[0]*100:.0f}%, mean reward {best_key[1]:.1f}")
 
