@@ -16,8 +16,20 @@ from model import build_model
 from replay import Replay
 
 
+def make_env(cfg, seed):
+    return DoomEnv(cfg.scenario, cfg.frame_skip, cfg.img_size, cfg.stack, seed=seed,
+                   combo=bool(cfg.combo_actions), aim_mode=cfg.aim_mode,
+                   aim_deltas=cfg.aim_deltas, aim_unit=cfg.aim_unit)
+
+
 def evaluate(policy, env, device, episodes, eps=0.0, n_actions=3):
     """Returns (mean_reward, success_rate). Success = episode reward > 0 (monster killed)."""
+    sc = evaluate_scores(policy, env, device, episodes, eps, n_actions)
+    return float(np.mean(sc)), float(np.mean(sc > 0))
+
+
+def evaluate_scores(policy, env, device, episodes, eps=0.0, n_actions=3):
+    """Per-episode rewards as an array."""
     policy.eval()
     scores = []
     for _ in range(episodes):
@@ -33,7 +45,7 @@ def evaluate(policy, env, device, episodes, eps=0.0, n_actions=3):
             total += r
         scores.append(total)
     policy.train()
-    return float(np.mean(scores)), float(np.mean(np.array(scores) > 0))
+    return np.array(scores)
 
 
 def main():
@@ -50,10 +62,11 @@ def main():
     print("Device:", device, torch.cuda.get_device_name(0) if device.type == "cuda" else "")
 
     combo = bool(cfg.combo_actions)
-    env = DoomEnv(cfg.scenario, cfg.frame_skip, cfg.img_size, cfg.stack, seed=cfg.seed, combo=combo)
-    eval_env = DoomEnv(cfg.scenario, cfg.frame_skip, cfg.img_size, cfg.stack, seed=cfg.seed + 1, combo=combo)
+    env = make_env(cfg, cfg.seed)
+    eval_env = make_env(cfg, cfg.seed + 1)
     n = env.n_actions
-    print(f"actions: {n}  frame_skip: {cfg.frame_skip}  combo: {combo}")
+    print(f"actions: {n}  frame_skip: {cfg.frame_skip}  combo: {combo}  aim_mode: {cfg.aim_mode}")
+    print("action vectors:", env.actions)
 
     policy = build_model(cfg, n).to(device)
     if args.resume:
@@ -140,7 +153,7 @@ def main():
         net = build_model(cfg, n).to(device)
         net.load_state_dict(torch.load(f"checkpoints/{tag}_step{step}.pt", map_location=device)["model"], strict=False)
         random.seed(1234)                                   # same eval randomness for every candidate
-        fenv = DoomEnv(cfg.scenario, cfg.frame_skip, cfg.img_size, cfg.stack, seed=cfg.seed + 2, combo=combo)
+        fenv = make_env(cfg, cfg.seed + 2)
         fm, fs = evaluate(net, fenv, device, cfg.final_eval_episodes, 0.0, n)
         fenv.close()
         final.append((fm, fs, step))
@@ -154,7 +167,21 @@ def main():
             for a_, b_, c_ in final:
                 w.writerow([c_, round(a_, 2), round(b_, 3)])
         print(f"Done. Best checkpoint: step {bstep}, mean reward {fm:.1f}, success {fs*100:.0f}% "
-              f"({cfg.final_eval_episodes} episodes)")
+              f"({cfg.final_eval_episodes} episodes; selection set, slightly optimistic)")
+        # unbiased report: winner re-scored on spawns never used for training or selection (seed+3)
+        net = build_model(cfg, n).to(device)
+        net.load_state_dict(torch.load(f"checkpoints/{tag}_best.pt", map_location=device)["model"], strict=False)
+        random.seed(4321)
+        henv = make_env(cfg, cfg.seed + 3)
+        hs = evaluate_scores(net, henv, device, cfg.final_eval_episodes, 0.0, n); henv.close()
+        ci = 1.96 * hs.std(ddof=1) / math.sqrt(len(hs))
+        with open(f"logs/{tag}_holdout.csv", "w", newline="") as f:
+            w = csv.writer(f); w.writerow(["step", "episodes", "mean", "std", "ci95", "median", "success"])
+            w.writerow([bstep, len(hs), round(hs.mean(), 2), round(hs.std(ddof=1), 2), round(ci, 2),
+                        round(float(np.median(hs)), 1), round(float((hs > 0).mean()), 3)])
+        np.savetxt(f"logs/{tag}_holdout_episodes.csv", hs, fmt="%.1f", header="episode_reward", comments="")
+        print(f"[holdout] mean {hs.mean():.2f} +/- {ci:.2f} (95% CI), std {hs.std(ddof=1):.1f}, "
+              f"success {(hs>0).mean()*100:.0f}% over {len(hs)} unseen episodes")
 
     fig, ax = plt.subplots(1, 2, figsize=(12, 4))
     if ep_hist:

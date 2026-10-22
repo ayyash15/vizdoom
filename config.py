@@ -12,6 +12,12 @@ class Config:
     reward_scale: float = 0.01     # raw ViZDoom rewards are large (e.g. +101), scale for stable learning
     combo_actions: int = 0         # 1 = add "move+attack" actions (assumes ATTACK is the LAST button, true for basic)
 
+    # --- aiming action space (experimental; "strafe" = original baseline, unchanged) ---
+    aim_mode: str = "strafe"       # strafe | turn | delta
+    aim_deltas: str = "1,3,8,20"   # delta mode: signed magnitudes (+/-) of TURN_LEFT_RIGHT_DELTA, comma separated
+    aim_unit: float = 1.0          # delta mode: multiplier on aim_deltas (UNVERIFIED units; calibrate with oracle_aim.py)
+    # combo_actions=1 in delta mode adds one "turn d + ATTACK" action per signed delta
+
     # --- model ---
     model: str = "cnn"             # cnn | snn  (PHASE 1: cnn. Switch to snn only after cnn passes)
     rate_reg: float = 0.0          # firing-rate penalty weight (SNN only). 0 = off. Try 0.01 - 0.1
