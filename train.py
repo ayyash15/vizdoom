@@ -1,5 +1,5 @@
 """Train a DQN agent on ViZDoom (cnn or snn).   python train.py --model cnn --run_name cnn_base"""
-import argparse, copy, csv, os, random, time
+import argparse, copy, csv, math, os, random, time
 from dataclasses import asdict
 
 import matplotlib
@@ -16,8 +16,20 @@ from model import build_model
 from replay import Replay
 
 
+def make_env(cfg, seed):
+    return DoomEnv(cfg.scenario, cfg.frame_skip, cfg.img_size, cfg.stack, seed=seed,
+                   combo=bool(cfg.combo_actions), aim_mode=cfg.aim_mode,
+                   aim_deltas=cfg.aim_deltas, aim_unit=cfg.aim_unit)
+
+
 def evaluate(policy, env, device, episodes, eps=0.0, n_actions=3):
     """Returns (mean_reward, success_rate). Success = episode reward > 0 (monster killed)."""
+    sc = evaluate_scores(policy, env, device, episodes, eps, n_actions)
+    return float(np.mean(sc)), float(np.mean(sc > 0))
+
+
+def evaluate_scores(policy, env, device, episodes, eps=0.0, n_actions=3):
+    """Per-episode rewards as an array."""
     policy.eval()
     scores = []
     for _ in range(episodes):
@@ -33,7 +45,7 @@ def evaluate(policy, env, device, episodes, eps=0.0, n_actions=3):
             total += r
         scores.append(total)
     policy.train()
-    return float(np.mean(scores)), float(np.mean(np.array(scores) > 0))
+    return np.array(scores)
 
 
 def main():
@@ -49,9 +61,12 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Device:", device, torch.cuda.get_device_name(0) if device.type == "cuda" else "")
 
-    env = DoomEnv(cfg.scenario, cfg.frame_skip, cfg.img_size, cfg.stack, seed=cfg.seed)
-    eval_env = DoomEnv(cfg.scenario, cfg.frame_skip, cfg.img_size, cfg.stack, seed=cfg.seed + 1)
+    combo = bool(cfg.combo_actions)
+    env = make_env(cfg, cfg.seed)
+    eval_env = make_env(cfg, cfg.seed + 1)
     n = env.n_actions
+    print(f"actions: {n}  frame_skip: {cfg.frame_skip}  combo: {combo}  aim_mode: {cfg.aim_mode}")
+    print("action vectors:", env.actions)
 
     policy = build_model(cfg, n).to(device)
     if args.resume:
@@ -72,13 +87,17 @@ def main():
                    f"checkpoints/{tag}_{name}.pt")
 
     s, ep_r = env.reset(), 0.0
-    best_key = (-1.0, -1e9)                    # (success_rate, mean_reward)
-    ep_hist, loss_v = [], 0.0
+    ep_hist, loss_v, evals = [], 0.0, []          # evals: (step, mean_reward, success)
     decay = cfg.eps_decay_frac * cfg.total_steps
     t0 = time.time()
     bar = tqdm(range(1, cfg.total_steps + 1), desc="train")
     for step in bar:
         eps = max(cfg.eps_end, cfg.eps_start - (cfg.eps_start - cfg.eps_end) * step / decay)
+        if cfg.lr_decay:
+            prog = step / cfg.total_steps
+            lr = cfg.lr * (cfg.lr_final_frac + (1 - cfg.lr_final_frac) * 0.5 * (1 + math.cos(math.pi * prog)))
+            for g in opt.param_groups:
+                g["lr"] = lr
         if random.random() < eps:
             a = random.randrange(n)
         else:
@@ -119,20 +138,62 @@ def main():
 
         if step % cfg.eval_every == 0:
             mean_r, succ = evaluate(policy, eval_env, device, cfg.eval_episodes, cfg.eval_eps, n)
+            evals.append((step, mean_r, succ))
             ev.writerow([step, round(mean_r, 1), round(succ, 3)]); ev_f.flush()
             print(f"\n[eval] step {step}: mean reward {mean_r:.1f}, success {succ*100:.0f}%  ({(time.time()-t0)/60:.1f} min)")
             save("last"); save(f"step{step}")
-            if (succ, mean_r) > best_key:
-                best_key = (succ, mean_r); save("best"); print("  -> new best saved")
 
     save("last"); log_f.close(); ev_f.close()
-    plt.figure(figsize=(8, 4))
+
+    # ---- final: re-score the top-k checkpoints on identical spawns, keep the best ----
+    ok = [e for e in evals if e[2] >= 0.95] or evals
+    cands = sorted(ok, key=lambda e: (e[1], e[2]), reverse=True)[:cfg.final_top_k]
+    final = []
+    for step, m, sc in cands:
+        net = build_model(cfg, n).to(device)
+        net.load_state_dict(torch.load(f"checkpoints/{tag}_step{step}.pt", map_location=device)["model"], strict=False)
+        random.seed(1234)                                   # same eval randomness for every candidate
+        fenv = make_env(cfg, cfg.seed + 2)
+        fm, fs = evaluate(net, fenv, device, cfg.final_eval_episodes, 0.0, n)
+        fenv.close()
+        final.append((fm, fs, step))
+        print(f"[final] step {step}: periodic {m:.1f} -> re-eval {fm:.1f} (success {fs*100:.0f}%, {cfg.final_eval_episodes} eps)")
+    if final:
+        fm, fs, bstep = sorted(final, key=lambda t: (t[1] >= 0.95, t[0]), reverse=True)[0]
+        torch.save(torch.load(f"checkpoints/{tag}_step{bstep}.pt", map_location="cpu"),
+                   f"checkpoints/{tag}_best.pt")
+        with open(f"logs/{tag}_final.csv", "w", newline="") as f:
+            w = csv.writer(f); w.writerow(["step", "mean_reward", "success_rate"])
+            for a_, b_, c_ in final:
+                w.writerow([c_, round(a_, 2), round(b_, 3)])
+        print(f"Done. Best checkpoint: step {bstep}, mean reward {fm:.1f}, success {fs*100:.0f}% "
+              f"({cfg.final_eval_episodes} episodes; selection set, slightly optimistic)")
+        # unbiased report: winner re-scored on spawns never used for training or selection (seed+3)
+        net = build_model(cfg, n).to(device)
+        net.load_state_dict(torch.load(f"checkpoints/{tag}_best.pt", map_location=device)["model"], strict=False)
+        random.seed(4321)
+        henv = make_env(cfg, cfg.seed + 3)
+        hs = evaluate_scores(net, henv, device, cfg.final_eval_episodes, 0.0, n); henv.close()
+        ci = 1.96 * hs.std(ddof=1) / math.sqrt(len(hs))
+        with open(f"logs/{tag}_holdout.csv", "w", newline="") as f:
+            w = csv.writer(f); w.writerow(["step", "episodes", "mean", "std", "ci95", "median", "success"])
+            w.writerow([bstep, len(hs), round(hs.mean(), 2), round(hs.std(ddof=1), 2), round(ci, 2),
+                        round(float(np.median(hs)), 1), round(float((hs > 0).mean()), 3)])
+        np.savetxt(f"logs/{tag}_holdout_episodes.csv", hs, fmt="%.1f", header="episode_reward", comments="")
+        print(f"[holdout] mean {hs.mean():.2f} +/- {ci:.2f} (95% CI), std {hs.std(ddof=1):.1f}, "
+              f"success {(hs>0).mean()*100:.0f}% over {len(hs)} unseen episodes")
+
+    fig, ax = plt.subplots(1, 2, figsize=(12, 4))
     if ep_hist:
         k = min(20, len(ep_hist))
-        plt.plot(np.convolve(ep_hist, np.ones(k) / k, mode="valid"), label=f"train (avg{k})")
-    plt.xlabel("episode"); plt.ylabel("reward"); plt.title(f"{cfg.model.upper()}-DQN on {cfg.scenario} [{tag}]")
-    plt.legend(); plt.tight_layout(); plt.savefig(f"logs/{tag}_curve.png", dpi=120)
-    print(f"Done. Best eval: success {best_key[0]*100:.0f}%, mean reward {best_key[1]:.1f}")
+        ax[0].plot(np.convolve(ep_hist, np.ones(k) / k, mode="valid"), label=f"train (avg{k})")
+        ax[0].legend()
+    ax[0].set_xlabel("episode"); ax[0].set_ylabel("reward")
+    if evals:
+        ax[1].plot([e[0] for e in evals], [e[1] for e in evals], marker="o")
+    ax[1].set_xlabel("step"); ax[1].set_ylabel("eval mean reward")
+    fig.suptitle(f"{cfg.model.upper()}-DQN on {cfg.scenario} [{tag}]")
+    fig.tight_layout(); fig.savefig(f"logs/{tag}_curve.png", dpi=120)
 
 
 if __name__ == "__main__":
