@@ -10,9 +10,24 @@ Success = episode reward > 0 (monster killed). "Accuracy" in this project means 
 
 ## Status
 - [x] Pipeline works (env, replay, DQN, eval) and SNN model exists
-- [ ] CNN-DQN above 90% success on `basic`  <- current task
-- [ ] SNN-DQN
+- [x] CNN-DQN above 90% success on `basic` (Phase 1 done, see results below)
+- [ ] SNN-DQN  <- current task
 - Old SNN results (v2 best 77%, final 47%) are in `results/archive_snn_v1_v2/`
+
+## Results
+
+### Phase 1: CNN-DQN baseline (`cnn_base`)
+| Item | Value |
+|---|---|
+| Success rate | **100%** (re-eval of best checkpoint, 200 episodes) |
+| Mean reward | 80.5 |
+| Best checkpoint | step 300000 |
+| Target | above 90% |
+
+Result files: `results/cnn_base/` (`cnn_base_evals.csv`, `cnn_base_episodes.csv`, `cnn_base_curve.png`).
+The checkpoint `cnn_base_best.pt` is not in git. Ask the team for a copy.
+
+This is the number the SNN has to be compared against in Phase 2.
 
 ## Files
 | File | Purpose |
@@ -43,6 +58,21 @@ Tips:
 - Use `CUDA_VISIBLE_DEVICES=0` if the server has more than one GPU.
 - Do not commit `checkpoints/` or `logs/`. Copy result CSVs and plots you want to keep into `results/`.
 
+## Getting results off Turing
+You cannot push to GitHub from Turing. Copy files to your PC, then push from there.
+
+Run these in PowerShell on your PC (not inside the SSH session):
+```powershell
+cd <your local repo folder>
+scp <your-eNNNNN>@turing.ce.pdn.ac.lk:~/vizdoom/results/<run_name>/* results/<run_name>/
+scp <your-eNNNNN>@turing.ce.pdn.ac.lk:~/vizdoom/checkpoints/<run_name>_best.pt .
+git checkout cnn-baseline
+git add results/<run_name>      # never use "git add ." (it would add .pt files)
+git commit -m "your message"
+git push
+```
+
 ## Git rules
-- Work on branch `cnn-baseline`. Merge to `main` when CNN passes 90%.
+- Work on branch `cnn-baseline`. Merge to `main` when the team agrees (CNN has passed 90%).
 - Commit code, configs and small result files only.
+- Do not commit `.pt` checkpoints or `logs/`.
