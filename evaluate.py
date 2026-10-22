@@ -22,7 +22,8 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     ck = torch.load(args.ckpt, map_location=device)
     c = ck["cfg"]
-    env = DoomEnv(c["scenario"], c["frame_skip"], c["img_size"], c["stack"], render=args.render)
+    env = DoomEnv(c["scenario"], c["frame_skip"], c["img_size"], c["stack"],
+                  render=args.render, combo=bool(c.get("combo_actions", 0)))
     net = build_model(c, ck["n_actions"]).to(device)
     net.load_state_dict(ck["model"], strict=False); net.eval()
 

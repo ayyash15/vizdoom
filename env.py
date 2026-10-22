@@ -1,4 +1,8 @@
-"""Thin ViZDoom wrapper: grayscale, resize, frame-skip, frame-stack, one-hot discrete actions."""
+"""Thin ViZDoom wrapper: grayscale, resize, frame-skip, frame-stack, discrete actions.
+
+combo=True adds one extra action per non-last button that presses that button AND the last
+button (ATTACK in basic) together: basic -> LEFT, RIGHT, ATTACK, LEFT+ATTACK, RIGHT+ATTACK.
+"""
 import os
 from collections import deque
 
@@ -9,7 +13,7 @@ import vizdoom as vzd
 
 class DoomEnv:
     def __init__(self, scenario="basic", frame_skip=4, size=64, stack=4,
-                 render=False, seed=None):
+                 render=False, seed=None, combo=False):
         self.size, self.stack, self.frame_skip = size, stack, frame_skip
         game = vzd.DoomGame()
         cfg = os.path.join(vzd.scenarios_path, f"{scenario}.cfg")
@@ -25,8 +29,15 @@ class DoomEnv:
         game.init()
         self.game = game
         n = game.get_available_buttons_size()
-        self.actions = np.eye(n, dtype=np.int32).tolist()   # one button per action
-        self.n_actions = n
+        acts = [row for row in np.eye(n, dtype=np.int32)]          # one button per action
+        if combo and n >= 2:
+            for i in range(n - 1):                                  # button i + last button
+                v = np.zeros(n, dtype=np.int32)
+                v[i] = 1
+                v[n - 1] = 1
+                acts.append(v)
+        self.actions = [a.tolist() for a in acts]
+        self.n_actions = len(self.actions)
         self.frames = deque(maxlen=stack)
         self._last_raw = np.zeros((120, 160), dtype=np.uint8)
 
