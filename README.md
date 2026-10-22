@@ -27,13 +27,13 @@ Success = episode reward > 0 (monster killed). "Accuracy" in this project means 
 Result files: `results/cnn_base/` (`cnn_base_evals.csv`, `cnn_base_episodes.csv`, `cnn_base_curve.png`).
 The checkpoint `cnn_base_best.pt` is not in git. Ask the team for a copy.
 
-This is the number the SNN has to be compared against in Phase 2.
+This is the old strafe-action baseline. For Phase 2 compare the SNN against `cnn_aim_delta` below (same action space).
 
 ## Files
 | File | Purpose |
 |---|---|
 | `config.py` | All hyperparameters (default model = `cnn`) |
-| `env.py` | ViZDoom wrapper: grayscale, 64x64, 4-frame stack, frame skip 4 |
+| `env.py` | ViZDoom wrapper: grayscale, resize, 4-frame stack, frame skip; `aim_mode` strafe/turn/delta |
 | `model.py` | `CnnDQN` and `SpikingDQN` |
 | `replay.py` | Replay buffer |
 | `train.py` | DQN training, evals, checkpoints |
@@ -76,3 +76,29 @@ git push
 - Work on branch `cnn-baseline`. Merge to `main` when the team agrees (CNN has passed 90%).
 - Commit code, configs and small result files only.
 - Do not commit `.pt` checkpoints or `logs/`.
+
+
+### Phase 1: CNN-DQN with delta aiming (`cnn_aim_delta`)
+| Item | Value |
+|---|---|
+| Success rate | **100%** (200 unseen held-out episodes) |
+| Mean reward | **95.00** (std 0.0; every episode scored 95) |
+| Best-case (oracle) ceiling, same actions | 94.92 (100 fixed seeds, `oracle_aim.py`) |
+| Old strafe ceiling / strafe CNN | ~84 / 80.5 |
+
+Reward function and scenario termination are unchanged. Only the action space differs:
+`TURN_LEFT_RIGHT_DELTA` with +/-1,3,8,20 plus ATTACK and delta+ATTACK combos (17 actions).
+
+Reproduce:
+
+    python oracle_aim.py --aim_mode delta --combo 1 --seeds 100 --aim_unit 1.0
+    python train.py --model cnn --run_name cnn_aim_delta --aim_mode delta --combo_actions 1 \
+      --aim_unit 1.0 --frame_skip 1 --total_steps 300000 --eps_decay_frac 0.2 --img_size 84
+    python evaluate.py --ckpt checkpoints/cnn_aim_delta_best.pt --episodes 200
+
+Notes and limitations:
+- `config.py` defaults still describe the old strafe baseline; pass the flags above for this run.
+- Delta units (`aim_unit`) were only checked through the oracle, not separately measured.
+- 95 is the oracle ceiling, so the held-out score has zero variance and the CI is degenerate.
+- Results are in `results/cnn_aim_delta/`. The earlier baseline is also kept under the git tag `cnn-baseline-final`.
+- Phase 2: run the SNN with the same `--aim_mode delta --combo_actions 1 --frame_skip 1` flags.
