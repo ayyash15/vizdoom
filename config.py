@@ -6,7 +6,7 @@ from dataclasses import dataclass
 class Config:
     # --- environment ---
     scenario: str = "basic"        # basic | defend_the_center | health_gathering | defend_the_line | deadly_corridor
-    frame_skip: int = 1
+    frame_skip: int = 2
     img_size: int = 64             # frames resized to img_size x img_size
     stack: int = 4                 # frames stacked as input channels
     reward_scale: float = 0.01     # raw ViZDoom rewards are large (e.g. +101), scale for stable learning
